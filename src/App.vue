@@ -36,6 +36,12 @@ export default {
 			messages.value.push({ role, text })
 		}
 
+		const rawEvents = ref([])
+		const pushRaw = (obj) => {
+			rawEvents.value.unshift({ t: new Date().toISOString(), v: obj })
+			if (rawEvents.value.length > 40) rawEvents.value.pop()
+		}
+
 		const onSend = (text) => {
 			pushMessage('user', text)
 			// Optionally forward to the embed if it accepts postMessage or custom events
@@ -51,6 +57,7 @@ export default {
 
 		const handleZapierEvent = (e) => {
 			console.debug('[App] zapier event raw ->', e)
+			pushRaw({ type: 'raw', e: e })
 
 			// Normalize incoming payload from possible sources (CustomEvent.detail, postMessage.data, or direct event)
 			const raw = e?.detail ?? e?.data ?? e
@@ -104,6 +111,7 @@ export default {
 			}
 
 			console.debug('[App] parsed zapier payload ->', { role, text })
+			pushRaw({ type: 'parsed', role, text })
 			pushMessage(role, text)
 		}
 
@@ -120,8 +128,21 @@ export default {
 			}
 		})
 
-		return { messages, onSend }
+		return { messages, onSend, rawEvents }
 	}
 }
 </script>
+
+<style>
+.raw-log {
+	max-height: 220px;
+	overflow: auto;
+	background: #0f1724;
+	color: #d1d5db;
+	padding: 8px;
+	font-size: 12px;
+	border-radius: 6px;
+}
+.raw-log pre { margin: 4px 0; white-space: pre-wrap; word-break: break-word }
+</style>
 
