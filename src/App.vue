@@ -8,141 +8,69 @@ const mirroredInput = ref('')
 const mirrorMessages = ref([])
 const syncStatus = ref('Sincronizando con el chat de Zapier...')
 
-let observer
 let pollTimer
-let rafHandle
 const seenMirrorKeys = new Set()
 
 function normalizeText(text) {
-  return text.replace(/\s+/g, ' ').trim()
+  return (text || '').replace(/\s+/g, ' ').trim()
 }
 
 function addMirrorMessage(role, text) {
   const normalized = normalizeText(text)
   if (!normalized) return
-
   const key = `${role}:${normalized}`
   if (seenMirrorKeys.has(key)) return
-
   seenMirrorKeys.add(key)
-  mirrorMessages.value.push({
-    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    role,
-    text: normalized,
-  })
+  mirrorMessages.value.push({ id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, role, text: normalized })
 }
 
-function getAllRoots(hostElement) {
-  const roots = [hostElement]
-  const stack = [hostElement]
-
-  while (stack.length > 0) {
-    const current = stack.pop()
-
-    if (current?.shadowRoot) {
-      roots.push(current.shadowRoot)
-      stack.push(current.shadowRoot)
-    }
-
-    const children = current?.children ?? []
-    for (const child of children) {
-      stack.push(child)
-    }
-  }
-
-  return roots
-}
-
-function nodeBelongsToHost(node, hostElement) {
-  let current = node
-  while (current) {
-    if (current === hostElement) return true
-    const root = current.getRootNode?.()
-    current = current.parentNode ?? root?.host
-  }
-  return false
-}
-
-function detectRoleFromNode(element) {
-  const attrs = [
-    element.getAttribute?.('data-role') ?? '',
-    element.getAttribute?.('data-message-author') ?? '',
-    element.getAttribute?.('aria-label') ?? '',
-    element.className ?? '',
-  ]
-    .join(' ')
-    .toLowerCase()
-
-  if (/assistant|bot|ai|zapier|agent|incoming|response/.test(attrs)) {
-    return 'assistant'
-  }
-  if (/user|human|me|you|outgoing|request/.test(attrs)) {
-    return 'user'
-  }
-  return 'assistant'
-}
-
+// Brute-force scanner: inspect host.shadowRoot if available, otherwise scan host subtree
 function scanZapierMessages() {
   const host = document.querySelector('zapier-interfaces-chatbot-embed')
   if (!host) {
-    syncStatus.value = 'Esperando a que cargue el embed de Zapier...'
+    syncStatus.value = 'Esperando embed de Zapier...'
     return
   }
 
-  const roots = getAllRoots(host)
-  const selector =
-    '[data-message-author], [data-role], [data-testid*="message"], [class*="message"], [class*="bubble"], li, p, article'
-
-  let newMessages = 0
-
-  for (const root of roots) {
-    const nodes = root.querySelectorAll?.(selector) ?? []
-    for (const node of nodes) {
-      const text = normalizeText(node.textContent ?? '')
-      if (!text) continue
-      if (text.length < 2 || text.length > 1200) continue
-      if (/type your message|powered by|send/i.test(text)) continue
-
-      const role = detectRoleFromNode(node)
-      const sizeBefore = mirrorMessages.value.length
-      addMirrorMessage(role, text)
-      if (mirrorMessages.value.length > sizeBefore) {
-        newMessages += 1
-      }
-    }
+  let candidates = []
+  try {
+    if (host.shadowRoot) candidates = Array.from(host.shadowRoot.querySelectorAll('*'))
+    else if (host.querySelectorAll) candidates = Array.from(host.querySelectorAll('*'))
+    else candidates = Array.from(document.querySelectorAll('zapier-interfaces-chatbot-embed *'))
+  } catch (e) {
+    candidates = Array.from(document.querySelectorAll('zapier-interfaces-chatbot-embed *'))
   }
 
-  if (newMessages > 0) {
-    syncStatus.value = `Sincronizado. ${mirrorMessages.value.length} mensajes detectados.`
+  let added = 0
+  for (const el of candidates) {
+    const text = normalizeText(el.innerText || el.textContent || '')
+    if (!text) continue
+    if (text.length < 2 || text.length > 1500) continue
+    if (/powered by|type your message/i.test(text)) continue
+
+    const attrs = `${el.getAttribute?.('data-role') || ''} ${el.getAttribute?.('data-message-author') || ''} ${el.className || ''}`.toLowerCase()
+    const role = /user|you|me|outgoing/.test(attrs) ? 'user' : 'assistant'
+
+    const before = mirrorMessages.value.length
+    addMirrorMessage(role, text)
+    if (mirrorMessages.value.length > before) added++
   }
+
+  if (added > 0) syncStatus.value = `Sincronizado (${mirrorMessages.value.length} mensajes)`
 }
 
-function scheduleScan() {
-  if (rafHandle) return
-  rafHandle = requestAnimationFrame(() => {
-    rafHandle = null
-    scanZapierMessages()
-  })
-}
-
+// Simple poller
 function observeChat() {
-  observer = new MutationObserver(() => {
-    scheduleScan()
-  })
-
-  observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-    characterData: true,
-  })
+  pollTimer = setInterval(scanZapierMessages, 1500)
 }
 
 function setNativeInputValue(input, value) {
-  const descriptor = Object.getOwnPropertyDescriptor(
-    Object.getPrototypeOf(input),
-    'value',
-  )
-  descriptor?.set?.call(input, value)
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')
+    descriptor?.set?.call(input, value)
+  } catch (e) {
+    // ignore
+  }
 }
 
 function sendToZapier() {
@@ -158,59 +86,52 @@ function sendToZapier() {
     return
   }
 
-  const roots = getAllRoots(host)
-  const inputCandidates = []
+  // brute-force: try shadowRoot inputs, then host inputs, then document-wide inputs under embed
+  let inputs = []
+  try {
+    if (host.shadowRoot) inputs = Array.from(host.shadowRoot.querySelectorAll('textarea, input'))
+    if (inputs.length === 0 && host.querySelectorAll) inputs = Array.from(host.querySelectorAll('textarea, input'))
+    if (inputs.length === 0) inputs = Array.from(document.querySelectorAll('zapier-interfaces-chatbot-embed textarea, zapier-interfaces-chatbot-embed input'))
+  } catch (e) {
+    inputs = Array.from(document.querySelectorAll('zapier-interfaces-chatbot-embed textarea, zapier-interfaces-chatbot-embed input'))
+  }
 
-  for (const root of roots) {
-    const elements = root.querySelectorAll?.('textarea, input[type="text"], input:not([type])') ?? []
-    for (const element of elements) {
-      if (nodeBelongsToHost(element, host)) {
-        inputCandidates.push(element)
-      }
+  const target = inputs.at(-1)
+  if (target) {
+    setNativeInputValue(target, text)
+    target.dispatchEvent(new Event('input', { bubbles: true }))
+    target.dispatchEvent(new Event('change', { bubbles: true }))
+  }
+
+  // try to click a send-like button
+  let buttons = []
+  try {
+    if (host.shadowRoot) buttons = Array.from(host.shadowRoot.querySelectorAll('button, [role="button"]'))
+    if (buttons.length === 0 && host.querySelectorAll) buttons = Array.from(host.querySelectorAll('button, [role="button"]'))
+    if (buttons.length === 0) buttons = Array.from(document.querySelectorAll('zapier-interfaces-chatbot-embed button, zapier-interfaces-chatbot-embed [role="button"]'))
+  } catch (e) {
+    buttons = Array.from(document.querySelectorAll('zapier-interfaces-chatbot-embed button, zapier-interfaces-chatbot-embed [role="button"]'))
+  }
+
+  for (const b of buttons) {
+    const label = `${b.textContent || ''} ${b.getAttribute?.('aria-label') || ''}`.toLowerCase()
+    if (/send|enviar|submit/.test(label)) {
+      try { b.click() } catch (e) {}
+      syncStatus.value = 'Mensaje enviado (bruto) al chat de Zapier.'
+      return
     }
   }
 
-  const targetInput = inputCandidates.at(-1)
-  if (!targetInput) {
-    syncStatus.value =
-      'Mensaje agregado al chat espejo. No se pudo controlar el input del widget de Zapier.'
+  // fallback: dispatch Enter on target input
+  if (target) {
+    try {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }))
+    } catch (e) {}
+    syncStatus.value = 'Mensaje reflejado (fallback Enter) al chat de Zapier.'
     return
   }
 
-  setNativeInputValue(targetInput, text)
-  targetInput.dispatchEvent(new Event('input', { bubbles: true }))
-  targetInput.dispatchEvent(new Event('change', { bubbles: true }))
-
-  let sendButton
-  for (const root of roots) {
-    const buttons = root.querySelectorAll?.('button, [role="button"]') ?? []
-    for (const button of buttons) {
-      if (!nodeBelongsToHost(button, host)) continue
-      const label = `${button.textContent ?? ''} ${button.getAttribute?.('aria-label') ?? ''}`.toLowerCase()
-      if (/send|enviar/.test(label)) {
-        sendButton = button
-        break
-      }
-    }
-    if (sendButton) break
-  }
-
-  if (sendButton) {
-    sendButton.click()
-    syncStatus.value = 'Mensaje enviado al chat de Zapier y reflejado a la derecha.'
-    return
-  }
-
-  targetInput.dispatchEvent(
-    new KeyboardEvent('keydown', {
-      key: 'Enter',
-      code: 'Enter',
-      bubbles: true,
-    }),
-  )
-
-  syncStatus.value =
-    'Mensaje reflejado y enviado con Enter (si el widget tiene envío por teclado habilitado).'
+  syncStatus.value = 'Mensaje agregado al espejo, no se pudo enviar al widget.'
 }
 
 onMounted(() => {
@@ -224,15 +145,10 @@ onMounted(() => {
 
   observeChat()
   scanZapierMessages()
-  pollTimer = setInterval(scanZapierMessages, 2000)
 })
 
 onBeforeUnmount(() => {
-  observer?.disconnect()
   clearInterval(pollTimer)
-  if (rafHandle) {
-    cancelAnimationFrame(rafHandle)
-  }
 })
 </script>
 
