@@ -50,24 +50,57 @@ export default {
 		}
 
 		const handleZapierEvent = (e) => {
-			// Generic handler: try different payload locations
 			console.debug('[App] zapier event raw ->', e)
-			const payload = e.detail ?? e.data ?? e
+
+			// Normalize incoming payload from possible sources (CustomEvent.detail, postMessage.data, or direct event)
+			const raw = e?.detail ?? e?.data ?? e
+			let payload = raw
+
+			// If payload is a string, try to parse JSON. If not JSON, keep as string.
+			if (typeof raw === 'string') {
+				try {
+					payload = JSON.parse(raw)
+				} catch (err) {
+					payload = raw
+				}
+			}
+
+			// Handle simple string control messages from the embed
+			if (typeof payload === 'string') {
+				if (payload === 'zChatbotReady') {
+					console.info('[App] zapier embed ready event received')
+					pushMessage('assistant', 'Zapier embed ready')
+					return
+				}
+				pushMessage('assistant', payload)
+				return
+			}
+
+			// For object payloads, try common shapes used by embeds
 			let text = ''
 			let role = 'assistant'
 
-			if (payload && typeof payload === 'object') {
-				if (payload.message && (payload.message.text || payload.message.content)) {
-					text = payload.message.text ?? payload.message.content
-				} else if (payload.text) {
-					text = payload.text
-				} else if (payload.content) {
-					text = payload.content
+			try {
+				if (payload?.type === 'message' && payload?.payload) {
+					const msg = payload.payload
+					text = msg?.text ?? msg?.content ?? msg?.body ?? ''
+					role = msg?.role ?? msg?.sender ?? role
+				} else if (payload?.message) {
+					const msg = payload.message
+					text = msg?.text ?? msg?.content ?? msg?.body ?? ''
+					role = msg?.role ?? msg?.sender ?? role
+				} else if (payload?.data?.message) {
+					const msg = payload.data.message
+					text = msg?.text ?? msg?.content ?? ''
+					role = msg?.role ?? role
+				} else if (payload?.text || payload?.content) {
+					text = payload.text ?? payload.content
+					role = payload.role ?? role
 				} else {
 					text = JSON.stringify(payload)
 				}
-			} else {
-				text = String(payload)
+			} catch (err) {
+				text = JSON.stringify(payload)
 			}
 
 			console.debug('[App] parsed zapier payload ->', { role, text })
