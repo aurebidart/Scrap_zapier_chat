@@ -8,6 +8,12 @@
 			<div class="chat-wrap">
 				<zapier-interfaces-chatbot-embed ref="zapierEmbed" is-popup="false" chatbot-id="cmmdnvuvz003obp3j5uedphlx" height="600px" width="400px"></zapier-interfaces-chatbot-embed>
 			</div>
+
+			<div style="margin-top:8px; font-size:13px;">
+				<strong>Embed iframe:</strong>
+				<span style="margin-left:8px; color:var(--muted)">{{ iframeStatus }}</span>
+				<button @click="testPostToIframe" style="margin-left:12px">Enviar prueba a iframe</button>
+			</div>
 		</div>
 
 		<div class="panel">
@@ -17,13 +23,23 @@
 			</div>
 			<div class="chat-wrap">
 				<MockChat :messages="messages" @send="onSend" />
+
+				<div style="margin-top:12px">
+					<strong>Eventos raw (últimos)</strong>
+					<div class="raw-log">
+						<div v-for="(r, i) in rawEvents" :key="i">
+							<div style="opacity:.6; font-size:11px">{{ r.t }}</div>
+							<pre>{{ r.v }}</pre>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 	</div>
 </template>
 
 <script>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import MockChat from './components/MockChat.vue'
 
 export default {
@@ -40,6 +56,77 @@ export default {
 		const pushRaw = (obj) => {
 			rawEvents.value.unshift({ t: new Date().toISOString(), v: obj })
 			if (rawEvents.value.length > 40) rawEvents.value.pop()
+		}
+
+		const zapierIframe = ref(null)
+		const iframeStatus = ref('no encontrado')
+		let iframePoll = null
+		let mo = null
+
+		const findIframe = () => {
+			try {
+				// Prefer searching inside the web component's shadowRoot
+				const el = document.querySelector('zapier-interfaces-chatbot-embed')
+				let iframe = null
+				if (el) {
+					// attempt shadowRoot
+					const sr = el.shadowRoot
+					if (sr) iframe = sr.querySelector('iframe')
+					// fallback: search descendants
+					if (!iframe) iframe = el.querySelector('iframe')
+				}
+
+				// global fallback: find a zapier iframe by src
+				if (!iframe) {
+					const all = [...document.querySelectorAll('iframe')]
+					iframe = all.find(f => (f.src || '').includes('zapier') || (f.src || '').includes('interfaces.zapier.com'))
+				}
+
+				if (iframe) {
+					zapierIframe.value = iframe
+					iframeStatus.value = `encontrado — src: ${iframe.src || 'n/a'}`
+					pushRaw({ type: 'info', note: 'iframe encontrado', src: iframe.src })
+					return true
+				}
+
+				iframeStatus.value = 'no encontrado'
+				return false
+			} catch (err) {
+				iframeStatus.value = 'error buscando iframe'
+				return false
+			}
+		}
+
+		const observeForIframe = (rootEl) => {
+			try {
+				if (!rootEl) return
+				mo = new MutationObserver(() => {
+					if (findIframe()) {
+						if (mo) { mo.disconnect(); mo = null }
+						if (iframePoll) { clearInterval(iframePoll); iframePoll = null }
+					}
+				})
+				mo.observe(rootEl, { childList: true, subtree: true })
+			} catch (err) {
+				// ignore
+			}
+		}
+
+		const testPostToIframe = () => {
+			try {
+				const target = zapierIframe.value || document.querySelector('zapier-interfaces-chatbot-embed')
+				if (zapierIframe.value && zapierIframe.value.contentWindow) {
+					zapierIframe.value.contentWindow.postMessage({ type: 'message', payload: { text: 'Prueba desde host' } }, '*')
+					pushRaw({ type: 'sent-test', ok: true })
+				} else if (target && target.contentWindow) {
+					target.contentWindow.postMessage({ type: 'message', payload: { text: 'Prueba desde host' } }, '*')
+					pushRaw({ type: 'sent-test', ok: true })
+				} else {
+					pushRaw({ type: 'sent-test', ok: false, reason: 'no iframe/contentWindow' })
+				}
+			} catch (err) {
+				pushRaw({ type: 'sent-test', ok: false, err: String(err) })
+			}
 		}
 
 		const onSend = (text) => {
@@ -125,10 +212,33 @@ export default {
 			if (el) {
 				el.addEventListener('message', handleZapierEvent)
 				el.addEventListener('zapier-message', handleZapierEvent)
+				// Observe for dynamically added iframe inside the component
+				observeForIframe(el)
 			}
+
+			// Start polling for an iframe for a short period in case it's created asynchronously
+			iframePoll = setInterval(() => {
+				if (findIframe()) {
+					clearInterval(iframePoll)
+					iframePoll = null
+				}
+			}, 800)
+			// stop polling after 12s
+			setTimeout(() => { if (iframePoll) { clearInterval(iframePoll); iframePoll = null } }, 12000)
 		})
 
-		return { messages, onSend, rawEvents }
+		onUnmounted(() => {
+			window.removeEventListener('message', handleZapierEvent)
+			const el = document.querySelector('zapier-interfaces-chatbot-embed')
+			if (el) {
+				el.removeEventListener('message', handleZapierEvent)
+				el.removeEventListener('zapier-message', handleZapierEvent)
+			}
+			if (mo) { mo.disconnect(); mo = null }
+			if (iframePoll) { clearInterval(iframePoll); iframePoll = null }
+		})
+
+		return { messages, onSend, rawEvents, iframeStatus, testPostToIframe }
 	}
 }
 </script>
