@@ -1,0 +1,131 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #f7f8fc;
+  color: #182033;
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.dashboard {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  width: min(1200px, 100% - 24px);
+  margin: 12px auto;
+}
+
+.panel {
+  background: #ffffff;
+  border: 1px solid #d7dfeb;
+  border-radius: 14px;
+  padding: 16px;
+  min-height: calc(100vh - 24px);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.panel-header h1,
+.panel-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.panel-header p {
+  margin: 6px 0 0;
+  font-size: 0.9rem;
+  color: #4c5568;
+}
+
+.input-bar {
+  display: flex;
+  gap: 8px;
+}
+
+.input-bar input {
+  flex: 1;
+  border: 1px solid #c3ccdb;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 0.95rem;
+}
+
+.input-bar button {
+  border: 0;
+  border-radius: 10px;
+  background: #2f64ff;
+  color: #ffffff;
+  padding: 0 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chat-wrap {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-bottom: 8px;
+}
+
+.mirror-thread {
+  flex: 1;
+  border: 1px solid #d7dfeb;
+  border-radius: 12px;
+  background: #f9fbff;
+  padding: 12px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.empty-state {
+  margin: auto;
+  font-size: 0.95rem;
+  color: #60708a;
+}
+
+.bubble {
+  max-width: 86%;
+  border-radius: 12px;
+  padding: 10px;
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.bubble strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.8rem;
+  opacity: 0.8;
+}
+
+.bubble.user {
+  align-self: flex-end;
+  background: #2f64ff;
+  color: #ffffff;
+}
+
+.bubble.assistant {
+  align-self: flex-start;
+  background: #eaf0ff;
+  color: #1f2a44;
+}
+
+@media (max-width: 980px) {
+  .dashboard {
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    min-height: auto;
+  }
+}
