@@ -53,8 +53,26 @@ export default {
 		}
 
 		const rawEvents = ref([])
+		const serializeEvent = (e) => {
+			try {
+				if (!e) return e
+				// If it's a MessageEvent-like object, extract useful fields
+				if (e instanceof MessageEvent || (e && 'data' in e && 'origin' in e)) {
+					return { data: e.data, origin: e.origin, lastEventId: e.lastEventId ?? null }
+				}
+				// If it's a DOM Event wrapper we stored earlier as { type: 'raw', e: e }
+				if (e && e.e && (e.e instanceof MessageEvent || ('data' in e.e && 'origin' in e.e))) {
+					return { data: e.e.data, origin: e.e.origin }
+				}
+				return e
+			} catch (err) {
+				return String(e)
+			}
+		}
+
 		const pushRaw = (obj) => {
-			rawEvents.value.unshift({ t: new Date().toISOString(), v: obj })
+			const v = serializeEvent(obj)
+			rawEvents.value.unshift({ t: new Date().toISOString(), v })
 			if (rawEvents.value.length > 40) rawEvents.value.pop()
 		}
 
